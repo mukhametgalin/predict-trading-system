@@ -49,7 +49,7 @@ class TradeRequest(BaseModel):
 
 
 class TradeResponse(BaseModel):
-    trade_id: str
+    trade_id: Optional[str] = None
     account_id: str
     account_name: str
     market_id: str

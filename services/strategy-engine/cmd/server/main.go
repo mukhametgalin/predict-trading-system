@@ -45,6 +45,7 @@ func main() {
 	exec := executor.NewExecutor(
 		cfg.PredictAccountURL,
 		cfg.PolymarketAccountURL,
+		cfg.DryRun,
 	)
 
 	// Create engine

@@ -35,30 +35,15 @@ func NewPostgres(url string) (*PostgresStorage, error) {
 }
 
 func createTables(db *sql.DB) error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS strategies (
-		id VARCHAR(255) PRIMARY KEY,
-		name VARCHAR(255) NOT NULL UNIQUE,
-		active BOOLEAN DEFAULT true,
-		config JSONB NOT NULL,
-		active_accounts TEXT[] DEFAULT '{}',
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_strategies_active ON strategies(active);
-	CREATE INDEX IF NOT EXISTS idx_strategies_name ON strategies(name);
-	`
-
-	_, err := db.Exec(schema)
-	return err
+	// Tables are created by init.sql, just verify connection
+	return nil
 }
 
 func (s *PostgresStorage) GetActiveStrategies() ([]types.Strategy, error) {
 	query := `
-		SELECT id, name, active, config, active_accounts, created_at, updated_at
+		SELECT id, name, type, enabled, config, created_at, updated_at
 		FROM strategies
-		WHERE active = true
+		WHERE enabled = true
 	`
 
 	rows, err := s.db.Query(query)
@@ -71,14 +56,13 @@ func (s *PostgresStorage) GetActiveStrategies() ([]types.Strategy, error) {
 	for rows.Next() {
 		var strategy types.Strategy
 		var configJSON []byte
-		var accounts []sql.NullString
 
 		err := rows.Scan(
 			&strategy.ID,
 			&strategy.Name,
+			&strategy.Type,
 			&strategy.Active,
 			&configJSON,
-			&accounts,
 			&strategy.CreatedAt,
 			&strategy.UpdatedAt,
 		)
@@ -93,13 +77,6 @@ func (s *PostgresStorage) GetActiveStrategies() ([]types.Strategy, error) {
 			continue
 		}
 
-		// Parse active accounts
-		for _, acc := range accounts {
-			if acc.Valid {
-				strategy.ActiveAccounts = append(strategy.ActiveAccounts, acc.String)
-			}
-		}
-
 		strategies = append(strategies, strategy)
 	}
 
@@ -108,21 +85,20 @@ func (s *PostgresStorage) GetActiveStrategies() ([]types.Strategy, error) {
 
 func (s *PostgresStorage) GetStrategy(id string) (*types.Strategy, error) {
 	query := `
-		SELECT id, name, active, config, active_accounts, created_at, updated_at
+		SELECT id, name, type, enabled, config, created_at, updated_at
 		FROM strategies
-		WHERE id = $1
+		WHERE id = $1::uuid
 	`
 
 	var strategy types.Strategy
 	var configJSON []byte
-	var accounts []sql.NullString
 
 	err := s.db.QueryRow(query, id).Scan(
 		&strategy.ID,
 		&strategy.Name,
+		&strategy.Type,
 		&strategy.Active,
 		&configJSON,
-		&accounts,
 		&strategy.CreatedAt,
 		&strategy.UpdatedAt,
 	)
@@ -136,13 +112,6 @@ func (s *PostgresStorage) GetStrategy(id string) (*types.Strategy, error) {
 	// Parse config
 	if err := json.Unmarshal(configJSON, &strategy.Config); err != nil {
 		return nil, err
-	}
-
-	// Parse active accounts
-	for _, acc := range accounts {
-		if acc.Valid {
-			strategy.ActiveAccounts = append(strategy.ActiveAccounts, acc.String)
-		}
 	}
 
 	return &strategy, nil

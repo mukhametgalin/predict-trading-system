@@ -90,7 +90,7 @@ async def cmd_stats(message: Message):
     if not is_authorized(message.from_user.id):
         await message.answer("🔐 Please authenticate first")
         return
-    
+
     try:
         stats = await api.get_stats()
         await message.answer(
@@ -104,7 +104,11 @@ async def cmd_stats(message: Message):
         )
     except Exception as e:
         logger.error(f"Failed to get stats: {e}")
-        await message.answer(f"❌ Error: {e}")
+        await message.answer(
+            "❌ Не удалось получить stats.\n\n"
+            "Если в логах `Conflict: terminated by other getUpdates request` — значит этот же токен запущен ещё где-то.\n"
+            "Нужно остановить второй экземпляр бота.",
+        )
 
 
 # ===== Menu Handlers =====

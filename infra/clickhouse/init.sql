@@ -1,5 +1,8 @@
 -- Predict Trading System - ClickHouse Schema
 
+CREATE DATABASE IF NOT EXISTS markets;
+USE markets;
+
 -- ===== Markets =====
 
 CREATE TABLE IF NOT EXISTS markets (
@@ -79,13 +82,15 @@ ORDER BY (strategy_type, timestamp);
 -- ===== Materialized Views =====
 
 -- Daily PnL by account
+-- NOTE: filled_at is Nullable, ClickHouse by default forbids nullable keys in ORDER BY.
+-- We avoid nullable keys by coalescing filled_at.
 CREATE MATERIALIZED VIEW IF NOT EXISTS daily_pnl_mv
 ENGINE = SummingMergeTree()
 ORDER BY (platform, account_id, date)
 AS SELECT
     platform,
     account_id,
-    toDate(filled_at) AS date,
+    toDate(coalesce(filled_at, created_at)) AS date,
     sum(CASE WHEN side = 'yes' THEN -price * shares ELSE price * shares END) AS pnl,
     count() AS trade_count
 FROM trade_history

@@ -27,6 +27,7 @@ type Command struct {
 type Strategy struct {
 	ID              string                 `json:"id"`
 	Name            string                 `json:"name"`
+	Type            string                 `json:"type"`
 	Active          bool                   `json:"active"`
 	Config          map[string]interface{} `json:"config"`
 	ActiveAccounts  []string               `json:"active_accounts"`

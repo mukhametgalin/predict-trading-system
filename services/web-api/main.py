@@ -429,16 +429,22 @@ async def list_strategies(db: AsyncSession = Depends(get_db)):
 @app.post("/strategies", response_model=StrategyDetail)
 async def create_strategy(data: StrategyCreate, db: AsyncSession = Depends(get_db)):
     """Create new strategy"""
-    result = await db.execute(text("""
-        INSERT INTO strategies (name, type, config, enabled)
-        VALUES (:name, :type, :config::jsonb, :enabled)
-        RETURNING id, name, type, config, enabled, created_at
-    """), {
-        "name": data.name,
-        "type": data.type,
-        "config": json.dumps(data.config),
-        "enabled": data.enabled,
-    })
+    from sqlalchemy import insert
+    from sqlalchemy import Table, Column, String, Boolean, DateTime, MetaData
+    from sqlalchemy.dialects.postgresql import UUID, JSONB
+    
+    # Use raw SQL with proper casting
+    config_json = json.dumps(data.config)
+    result = await db.execute(text(
+        "INSERT INTO strategies (name, type, config, enabled) "
+        "VALUES (:name, :type, CAST(:config AS jsonb), :enabled) "
+        "RETURNING id, name, type, config, enabled, created_at"
+    ).bindparams(
+        name=data.name,
+        type=data.type,
+        config=config_json,
+        enabled=data.enabled,
+    ))
     await db.commit()
     
     row = result.fetchone()
@@ -467,7 +473,7 @@ async def update_strategy(
         params["name"] = data.name
     
     if data.config is not None:
-        updates.append("config = :config::jsonb")
+        updates.append("config = CAST(:config AS jsonb)")
         params["config"] = json.dumps(data.config)
     
     if data.enabled is not None:
@@ -477,12 +483,13 @@ async def update_strategy(
     if not updates:
         raise HTTPException(400, "No fields to update")
     
-    result = await db.execute(text(f"""
+    query = text(f"""
         UPDATE strategies
         SET {", ".join(updates)}, updated_at = NOW()
-        WHERE id = :id::uuid
+        WHERE id = CAST(:id AS uuid)
         RETURNING id, name, type, config, enabled, created_at
-    """), params)
+    """)
+    result = await db.execute(query.bindparams(**params))
     await db.commit()
     
     row = result.fetchone()

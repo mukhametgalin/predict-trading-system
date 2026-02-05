@@ -1,5 +1,6 @@
 """Predict.fun API client"""
 
+import asyncio
 import httpx
 import logging
 from typing import Optional, Dict, Any
@@ -23,7 +24,7 @@ class PredictClient:
     
     async def get_auth_message(self, address: str) -> str:
         """Get authentication message to sign"""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
                 f"{self.base_url}/v1/auth/message",
                 params={"address": address},
@@ -31,61 +32,84 @@ class PredictClient:
             )
             response.raise_for_status()
             data = response.json()
-            return data["message"]
+            # API returns {success: true, data: {message: "..."}}
+            return data["data"]["message"]
     
-    async def get_jwt(self, address: str, signature: str) -> str:
+    async def get_jwt(self, signer: str, signature: str, message: str) -> str:
         """Get JWT token with signed message"""
-        async with httpx.AsyncClient() as client:
+        # Predict expects signature as 0x-prefixed hex string
+        if signature and not signature.startswith("0x"):
+            signature = "0x" + signature
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{self.base_url}/v1/auth/jwt",
+                f"{self.base_url}/v1/auth",
                 json={
-                    "address": address,
+                    "signer": signer,
                     "signature": signature,
+                    "message": message,
                 },
                 headers=self.headers,
             )
             response.raise_for_status()
             data = response.json()
-            return data["jwt"]
+            # API usually returns {success: true, data: {token: "..."}}
+            if isinstance(data, dict) and "data" in data and isinstance(data["data"], dict):
+                return data["data"].get("token") or data["data"].get("jwt")
+            return data.get("token") or data.get("jwt")
     
     async def authenticate(self, private_key: str) -> str:
         """Full authentication flow: get message, sign, get JWT"""
-        # Get account
         account = Account.from_key(private_key)
         address = account.address
-        
-        # Get message to sign
+
         message = await self.get_auth_message(address)
-        
-        # Sign message
+
         encoded_message = encode_defunct(text=message)
         signed_message = account.sign_message(encoded_message)
         signature = signed_message.signature.hex()
-        
-        # Get JWT
-        jwt = await self.get_jwt(address, signature)
-        
+        if not signature.startswith("0x"):
+            signature = "0x" + signature
+
+        jwt = await self.get_jwt(address, signature, message)
+        if not jwt:
+            raise ValueError("JWT not found in auth response")
         return jwt
     
     async def get_market(self, market_id: str) -> Dict[str, Any]:
         """Get market details"""
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/v1/markets/{market_id}",
-                headers=self.headers,
-            )
-            response.raise_for_status()
-            return response.json()
+        last_err = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(
+                        f"{self.base_url}/v1/markets/{market_id}",
+                        headers=self.headers,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    return data.get("data", data)
+            except (httpx.TransportError, httpx.HTTPStatusError) as e:
+                last_err = e
+                await asyncio.sleep(0.5 * (attempt + 1))
+        raise last_err
     
     async def get_orderbook(self, market_id: str) -> Dict[str, Any]:
         """Get market orderbook"""
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.base_url}/v1/markets/{market_id}/orderbook",
-                headers=self.headers,
-            )
-            response.raise_for_status()
-            return response.json()
+        last_err = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(
+                        f"{self.base_url}/v1/markets/{market_id}/orderbook",
+                        headers=self.headers,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    return data.get("data", data)
+            except (httpx.TransportError, httpx.HTTPStatusError) as e:
+                last_err = e
+                await asyncio.sleep(0.5 * (attempt + 1))
+        raise last_err
     
     async def create_order(
         self,
@@ -113,23 +137,31 @@ class PredictClient:
         }
         
         # Create HTTP client with proxy if provided
-        client_kwargs = {}
+        client_kwargs = {"timeout": 60.0}
         if proxy_url:
-            client_kwargs["proxies"] = proxy_url
-        
-        async with httpx.AsyncClient(**client_kwargs) as client:
-            response = await client.post(
-                f"{self.base_url}/v1/orders",
-                json=order_data,
-                headers=headers,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            return response.json()
+            # httpx>=0.28 uses `proxy=` instead of `proxies=`
+            client_kwargs["proxy"] = proxy_url
+
+        last_err = None
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(**client_kwargs) as client:
+                    response = await client.post(
+                        f"{self.base_url}/v1/orders",
+                        json=order_data,
+                        headers=headers,
+                    )
+                    response.raise_for_status()
+                    return response.json()
+            except (httpx.TransportError, httpx.HTTPStatusError) as e:
+                last_err = e
+                await asyncio.sleep(1.0 * (attempt + 1))
+
+        raise last_err
     
     async def get_positions(self, address: str) -> list[Dict[str, Any]]:
         """Get positions for address"""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
                 f"{self.base_url}/v1/positions",
                 params={"address": address},
@@ -140,7 +172,7 @@ class PredictClient:
     
     async def get_orders(self, address: str) -> list[Dict[str, Any]]:
         """Get orders for address"""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
                 f"{self.base_url}/v1/orders",
                 params={"address": address},

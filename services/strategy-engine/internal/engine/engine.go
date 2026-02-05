@@ -82,13 +82,14 @@ func (e *Engine) handleEvent(
 
 		// Get handler for this strategy
 		e.mu.RLock()
-		handler, exists := e.handlers[strategy.Name]
+		handler, exists := e.handlers[strategy.Type]
 		e.mu.RUnlock()
 
 		if !exists {
 			log.Warn().
 				Str("strategy", strategy.Name).
-				Msg("No handler registered for strategy")
+				Str("type", strategy.Type).
+				Msg("No handler registered for strategy type")
 			continue
 		}
 

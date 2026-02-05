@@ -210,33 +210,47 @@ async def execute_trade(
             trade_request=trade_request,
         )
         
-        # Publish event
-        await event_publisher.publish_trade_event("trade_executed", {
-            "account_id": account.id,
-            "account_name": account.name,
-            "market_id": trade_request.market_id,
-            "side": trade_request.side,
-            "price": trade_request.price,
-            "shares": trade_request.shares,
-            "order_hash": result.get("order_hash"),
-            "platform": "predict",
-        })
-        
+        # Publish event (avoid emitting "executed" on dry-run)
+        if result.get("status") == "dry_run":
+            await event_publisher.publish_trade_event("trade_dry_run", {
+                "account_id": account.id,
+                "account_name": account.name,
+                "market_id": trade_request.market_id,
+                "side": trade_request.side,
+                "price": trade_request.price,
+                "shares": trade_request.shares,
+                "platform": "predict",
+            })
+        else:
+            await event_publisher.publish_trade_event("trade_executed", {
+                "account_id": account.id,
+                "account_name": account.name,
+                "market_id": trade_request.market_id,
+                "side": trade_request.side,
+                "price": trade_request.price,
+                "shares": trade_request.shares,
+                "order_hash": result.get("order_hash"),
+                "platform": "predict",
+            })
+
         return result
         
     except Exception as e:
-        logger.error(f"Trade execution failed: {e}")
+        import traceback
+        err_text = str(e) or repr(e)
+        logger.error(f"Trade execution failed: {err_text}")
+        logger.error(traceback.format_exc())
         
         # Publish error event
         await event_publisher.publish_trade_event("trade_error", {
             "account_id": account.id,
             "account_name": account.name,
             "market_id": trade_request.market_id,
-            "error": str(e),
+            "error": err_text,
             "platform": "predict",
         })
         
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=err_text)
 
 
 @app.get("/positions/{account_id}", response_model=list[PositionResponse])

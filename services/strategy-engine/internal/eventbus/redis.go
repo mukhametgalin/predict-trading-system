@@ -17,7 +17,9 @@ type RedisEventBus struct {
 
 func NewRedisEventBus(host string, port int) (*RedisEventBus, error) {
 	client := redis.NewClient(&redis.Options{
-		Addr: fmt.Sprintf("%s:%d", host, port),
+		Addr:         fmt.Sprintf("%s:%d", host, port),
+		ReadTimeout:  10 * time.Second, // must be > Block in XREAD
+		WriteTimeout: 10 * time.Second,
 	})
 
 	// Test connection
@@ -39,13 +41,13 @@ func (b *RedisEventBus) Subscribe(ctx context.Context, streams []string, handler
 	// Create stream args for XREAD
 	args := &redis.XReadArgs{
 		Streams: append(streams, make([]string, len(streams))...),
-		Block:   0, // Block indefinitely
+		Block:   5000, // Block for 5 seconds
 		Count:   10,
 	}
 
-	// Initialize last IDs to ">" (only new messages)
+	// Initialize last IDs to "$" (only new messages from now on)
 	for i := range streams {
-		args.Streams[len(streams)+i] = ">"
+		args.Streams[len(streams)+i] = "$"
 	}
 
 	for {
@@ -57,9 +59,13 @@ func (b *RedisEventBus) Subscribe(ctx context.Context, streams []string, handler
 			result, err := b.client.XRead(ctx, args).Result()
 			if err != nil {
 				if err == redis.Nil {
+					// Timeout, no new messages - continue polling
 					continue
 				}
-				log.Error().Err(err).Msg("Failed to read from stream")
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				log.Warn().Err(err).Msg("Failed to read from stream, retrying...")
 				time.Sleep(time.Second)
 				continue
 			}
@@ -120,23 +126,38 @@ func (b *RedisEventBus) Publish(ctx context.Context, stream string, event types.
 }
 
 func (b *RedisEventBus) parseEvent(msg redis.XMessage) (types.Event, error) {
+	// Be tolerant to missing fields. Our publishers may not set "id".
 	event := types.Event{
-		ID:       msg.Values["id"].(string),
-		Type:     msg.Values["type"].(string),
-		Platform: msg.Values["platform"].(string),
+		ID:        msg.ID,
+		Type:      "",
+		Platform:  "",
+		Timestamp: time.Now().UTC(),
+		Data:      map[string]interface{}{},
 	}
 
-	if ts, ok := msg.Values["timestamp"].(string); ok {
-		t, err := time.Parse(time.RFC3339, ts)
-		if err == nil {
-			event.Timestamp = t
+	if v, ok := msg.Values["type"]; ok {
+		if s, ok2 := v.(string); ok2 {
+			event.Type = s
 		}
 	}
-
-	if dataStr, ok := msg.Values["data"].(string); ok {
-		var data map[string]interface{}
-		if err := json.Unmarshal([]byte(dataStr), &data); err == nil {
-			event.Data = data
+	if v, ok := msg.Values["platform"]; ok {
+		if s, ok2 := v.(string); ok2 {
+			event.Platform = s
+		}
+	}
+	if v, ok := msg.Values["timestamp"]; ok {
+		if s, ok2 := v.(string); ok2 {
+			if t, err := time.Parse(time.RFC3339, s); err == nil {
+				event.Timestamp = t
+			}
+		}
+	}
+	if v, ok := msg.Values["data"]; ok {
+		if s, ok2 := v.(string); ok2 {
+			var data map[string]interface{}
+			if err := json.Unmarshal([]byte(s), &data); err == nil {
+				event.Data = data
+			}
 		}
 	}
 

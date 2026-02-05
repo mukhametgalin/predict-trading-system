@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [markets, setMarkets] = useState<Market[]>([])
   const [alerts, setAlerts] = useState<Alert[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
 
   const loadStats = useCallback(async () => {
     try {
@@ -74,11 +75,19 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    loadStats()
-    loadAccounts()
-    loadStrategies()
-    loadMarkets()
-    loadAlerts()
+    setLoading(true)
+    Promise.all([
+      loadStats(),
+      loadAccounts(),
+      loadStrategies(),
+      loadMarkets(),
+      loadAlerts(),
+    ])
+      .catch((err) => {
+        console.error('Initial load failed:', err)
+        setError(String(err))
+      })
+      .finally(() => setLoading(false))
   }, [loadStats, loadAccounts, loadStrategies, loadMarkets, loadAlerts])
 
   // WebSocket connection for real-time updates
@@ -128,6 +137,14 @@ export default function Dashboard() {
       }
     }
   }, [loadStats, loadAccounts])
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-muted-foreground">Loading...</div>
+      </div>
+    )
+  }
 
   if (error) {
     return (

@@ -16,12 +16,14 @@ type Executor struct {
 	predictURL    string
 	polymarketURL string
 	httpClient    *http.Client
+	dryRun        bool
 }
 
-func NewExecutor(predictURL, polymarketURL string) *Executor {
+func NewExecutor(predictURL, polymarketURL string, dryRun bool) *Executor {
 	return &Executor{
 		predictURL:    predictURL,
 		polymarketURL: polymarketURL,
+		dryRun:        dryRun,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -67,7 +69,7 @@ func (e *Executor) placeOrder(ctx context.Context, cmd types.Command) error {
 		"side":       cmd.Side,
 		"price":      cmd.Price,
 		"shares":     cmd.Shares,
-		"confirm":    true, // Execute for real
+		"confirm":    !e.dryRun,
 	}
 
 	jsonData, err := json.Marshal(payload)

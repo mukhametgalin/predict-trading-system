@@ -17,11 +17,17 @@ async def execute_trade(
 ) -> Dict[str, Any]:
     """Execute trade on Predict.fun"""
     
+    # Use account's API key if available
+    if account.api_key:
+        client = PredictClient(api_key=account.api_key)
+    else:
+        client = predict_client
+    
     # Dry-run check
     if not trade_request.confirm:
         # Get market details for dry-run
-        market = await predict_client.get_market(trade_request.market_id)
-        orderbook = await predict_client.get_orderbook(trade_request.market_id)
+        market = await client.get_market(trade_request.market_id)
+        orderbook = await client.get_orderbook(trade_request.market_id)
         
         return {
             "trade_id": None,
@@ -41,15 +47,16 @@ async def execute_trade(
     
     # Authenticate
     logger.info(f"Authenticating account {account.name} ({account.address})")
-    jwt = await predict_client.authenticate(account.private_key)
+    jwt = await client.authenticate(account.private_key)
     
     # Get market to find outcome ID
-    market = await predict_client.get_market(trade_request.market_id)
+    market = await client.get_market(trade_request.market_id)
     
     # Find outcome ID based on side
     outcome_id = None
+    desired_name = "Yes" if trade_request.side.lower() == "yes" else "No"
     for outcome in market.get("outcomes", []):
-        if outcome.get("side", "").lower() == trade_request.side.lower():
+        if str(outcome.get("name", "")).lower() == desired_name.lower():
             outcome_id = outcome.get("onChainId") or outcome.get("id")
             break
     
@@ -59,14 +66,14 @@ async def execute_trade(
     # Create order
     logger.info(f"Creating order: {trade_request.side.upper()} {trade_request.shares} @ {trade_request.price}")
     
-    result = await predict_client.create_order(
+    result = await client.create_order(
         jwt=jwt,
         market_id=trade_request.market_id,
         outcome_id=outcome_id,
         side=trade_request.side,
         price=trade_request.price,
         shares=trade_request.shares,
-        proxy_url=account.proxy_url,
+        proxy_url=None,  # disable proxy for first money test to avoid timeouts
     )
     
     order_hash = result.get("hash") or result.get("orderHash")

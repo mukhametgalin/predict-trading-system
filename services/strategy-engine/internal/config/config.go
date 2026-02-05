@@ -32,7 +32,7 @@ func buildPostgresURL() string {
 	host := getEnv("POSTGRES_HOST", "postgres")
 	db := getEnv("POSTGRES_DB", "trading_system")
 	user := getEnv("POSTGRES_USER", "trading")
-	pass := getEnv("POSTGRES_PASSWORD", "changeme")
+	pass := getEnv("POSTGRES_PASSWORD", "changeme123")
 	
 	return fmt.Sprintf("postgres://%s:%s@%s:5432/%s?sslmode=disable", user, pass, host, db)
 }
