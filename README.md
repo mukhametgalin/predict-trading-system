@@ -1,194 +1,189 @@
-# Predict Trading System 🎯
+# Predict Trading System
 
-Event-driven multi-platform prediction market trading system with automated strategies.
+Микросервисная система для автоматизированной торговли на prediction markets (Predict.fun, Polymarket).
 
-## 🏗 Architecture
+## Архитектура
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    UI Layer                         │
-│  ┌──────────────┐         ┌──────────────────────┐ │
-│  │ Web Frontend │         │  Telegram Bot       │ │
-│  │ (React)      │         │  (Alerts, Control)  │ │
-│  └──────────────┘         └──────────────────────┘ │
-└─────────────────────────────────────────────────────┘
-              │                        │
-              └────────────┬───────────┘
-                           │ (REST/WebSocket)
-┌─────────────────────────────────────────────────────┐
-│           Strategy Engine (Golang)                  │
-│  ┌──────────────────────────────────────────────┐  │
-│  │  Event Bus (Redis Streams)                   │  │
-│  │  - Trade fills                               │  │
-│  │  - Order cancels                             │  │
-│  │  - Market updates                            │  │
-│  └──────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────┐  │
-│  │  Strategy Executor                           │  │
-│  │  - Delta Neutral                             │  │
-│  │  - Custom strategies                         │  │
-│  └──────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────┘
-       │                │                │
-       ▼                ▼                ▼
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│ Predict.fun  │ │ Polymarket   │ │  ClickHouse  │
-│ Account Svc  │ │ Account Svc  │ │  Data Store  │
-│ (Python)     │ │ (Python)     │ │              │
-└──────────────┘ └──────────────┘ └──────────────┘
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│    Web UI       │     │  Telegram Bot   │     │   External      │
+│   (Next.js)     │     │   (aiogram)     │     │   Clients       │
+└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │      Web API Gateway    │
+                    │       (FastAPI)         │
+                    └────────────┬────────────┘
+                                 │
+         ┌───────────────────────┼───────────────────────┐
+         │                       │                       │
+┌────────▼────────┐    ┌────────▼────────┐    ┌────────▼────────┐
+│ Predict Account │    │Strategy Engine  │    │Polymarket Acct  │
+│   (FastAPI)     │    │    (Golang)     │    │   (FastAPI)     │
+└────────┬────────┘    └────────┬────────┘    └────────┬────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+              ┌──────────────────┼──────────────────┐
+              │                  │                  │
+     ┌────────▼────────┐ ┌──────▼──────┐ ┌────────▼────────┐
+     │   PostgreSQL    │ │    Redis    │ │   ClickHouse    │
+     │  (accounts,     │ │  (events,   │ │   (markets,     │
+     │   strategies)   │ │   streams)  │ │    history)     │
+     └─────────────────┘ └─────────────┘ └─────────────────┘
 ```
 
-## 🚀 Features
+## Сервисы
 
-- ✅ **Multi-account management** - Predict.fun & Polymarket
-- ✅ **Event-driven strategies** - React to fills, cancels, market changes
-- ✅ **Delta neutral trading** - Automated hedging across platforms
-- ✅ **Real-time monitoring** - Web dashboard + Telegram alerts
-- ✅ **Account isolation** - Proxy support per account
-- ✅ **Strategy versioning** - Code + config in database
+| Сервис | Порт | Описание |
+|--------|------|----------|
+| Web UI | 3000 | Next.js дашборд |
+| Web API | 8001 | Центральный API gateway |
+| Predict Account | 8010 | Управление аккаунтами Predict.fun |
+| Polymarket Account | 8011 | Управление аккаунтами Polymarket |
+| Strategy Engine | 8020 | Обработка стратегий (Golang) |
+| PostgreSQL | 5432 | Основная БД |
+| ClickHouse | 8123/9000 | Аналитика и история |
+| Redis | 6379 | Event bus (Streams) |
 
-## 📦 Services
-
-### Core Services
-- **predict-account** - Predict.fun account & trading service (Python/FastAPI)
-- **polymarket-account** - Polymarket account & trading service (Python/FastAPI)
-- **strategy-engine** - Event processing & strategy execution (Golang)
-- **web-api** - Web API & WebSocket gateway (Python/FastAPI)
-
-### UI
-- **web** - React dashboard for monitoring & management
-- **telegram** - Telegram bot for alerts & critical controls
-
-### Infrastructure
-- **ClickHouse** - Market data & trade logs
-- **PostgreSQL** - Accounts, strategies, configs
-- **Redis** - Event bus (Redis Streams)
-
-## 🔧 Quick Start
-
-### Prerequisites
-- Docker & Docker Compose
-- Predict.fun API key ([request here](https://discord.gg/predictdotfun))
-- Telegram bot token (optional, for alerts)
-
-### Setup
+## Быстрый старт
 
 ```bash
-# Clone repository
-git clone https://github.com/mukhametgalin/predict-trading-system.git
+# 1. Клонировать репозиторий
+git clone https://github.com/mukhametgalin/predict-trading-system
 cd predict-trading-system
 
-# Copy example env
+# 2. Скопировать и настроить .env
 cp .env.example .env
+# Отредактировать .env - добавить TELEGRAM_BOT_TOKEN и т.д.
 
-# Edit .env with your API keys
-nano .env
+# 3. Запустить всё
+make quickstart
 
-# Start all services
-docker compose up -d
-
-# Check status
-docker compose ps
-
-# View logs
-docker compose logs -f
+# Или по шагам:
+make build      # Собрать образы
+make up         # Запустить
+make add-accounts    # Добавить тестовые аккаунты
+make init-strategy   # Инициализировать стратегию
 ```
 
-### Add accounts
+## Стратегии
 
-```bash
-# Using CLI
-./scripts/add-account.sh predict account1 0xYOUR_PRIVATE_KEY http://proxy:8080
+### Delta Neutral
 
-# Or via Web UI
-# Navigate to http://localhost:3000/accounts
-```
+Автоматическое хеджирование между парными аккаунтами:
+- При срабатывании ордера на primary аккаунте
+- Автоматически создаётся противоположный ордер на hedge аккаунте
+- YES → NO, NO → YES
 
-### Run first strategy
-
-```bash
-# Initialize delta neutral strategy
-./scripts/init-strategy.sh delta-neutral \
-  --accounts acc1,acc2,acc3,acc4 \
-  --markets market_id_1,market_id_2
-
-# Start strategy
-curl -X POST http://localhost:8001/strategies/delta-neutral/start
-```
-
-## 📊 Monitoring
-
-- **Web Dashboard**: http://localhost:3000
-- **API Docs**: http://localhost:8001/docs
-- **ClickHouse UI**: http://localhost:8123/play
-- **Redis Commander**: http://localhost:8081
-
-## 🎯 Strategies
-
-### Delta Neutral (Built-in)
-
-Automated hedging strategy:
-1. Place limit orders on Platform A (e.g., Predict.fun YES @ -2% from mid)
-2. When filled, immediately place opposite order on Platform B (e.g., Predict.fun NO @ same price)
-3. Monitor positions and alert on imbalances
-
-**Configuration:**
-```yaml
-strategy: delta_neutral_v1
-active_accounts:
-  - predict_acc1
-  - predict_acc2
-  - predict_acc3
-  - predict_acc4
-pairs:
-  - primary: predict_acc1
-    hedge: predict_acc2
-  - primary: predict_acc3
-    hedge: predict_acc4
-markets:
-  - market_id_1
-  - market_id_2
-initial_orders:
-  side: yes
-  price_offset: -0.02  # -2% from best bid
-  shares: 100
-target_platform: predict  # Start with predict-only, later: polymarket
-```
-
-### Custom Strategies
-
-Create your own strategies by implementing the strategy interface:
-
-```go
-type Strategy interface {
-    OnEvent(event Event) ([]Command, error)
-    OnInit(config Config) error
-    OnShutdown() error
+```json
+{
+  "pairs": [
+    {"primary": "account1_id", "hedge": "account2_id"}
+  ],
+  "target_platform": "predict",
+  "price_adjustment": 0.0,
+  "max_position_size": 10.0
 }
 ```
 
-## 🔐 Security
+## API Endpoints
 
-- All private keys encrypted at rest
-- Per-account proxy support
-- No keys in logs or UI
-- Telegram 2FA for critical operations
+### Web API (port 8001)
 
-## 📚 Documentation
+```
+GET  /dashboard/stats     - Статистика
+GET  /accounts            - Список аккаунтов
+POST /accounts            - Создать аккаунт
+GET  /accounts/{p}/{id}   - Детали аккаунта
+PUT  /accounts/{p}/{id}   - Обновить аккаунт
+DELETE /accounts/{p}/{id} - Удалить аккаунт
+POST /trade               - Выполнить трейд
+GET  /positions/{p}/{id}  - Позиции аккаунта
+GET  /markets             - Список маркетов
+GET  /strategies          - Список стратегий
+POST /strategies          - Создать стратегию
+PUT  /strategies/{id}     - Обновить стратегию
+GET  /alerts              - Список алертов
+WS   /ws                  - WebSocket для real-time
+```
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [API Reference](docs/API.md)
-- [Strategy Development](docs/STRATEGIES.md)
-- [Deployment](docs/DEPLOYMENT.md)
+### Predict Account (port 8010)
 
-## 🐛 Troubleshooting
+```
+GET  /accounts            - Список аккаунтов
+POST /accounts            - Создать аккаунт
+GET  /accounts/{id}       - Детали
+PUT  /accounts/{id}       - Обновить
+DELETE /accounts/{id}     - Удалить
+POST /trade               - Выполнить трейд (confirm=false для dry-run)
+GET  /positions/{id}      - Позиции
+```
 
-See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+## Telegram Bot
 
-## 🤝 Contributing
+Команды:
+- `/start` - Главное меню
+- `/auth <password>` - Аутентификация
+- `/stats` - Статистика
+- `/cancel` - Отмена текущей операции
 
-Pull requests welcome!
+Меню:
+- 📊 Dashboard - Статистика
+- 👥 Accounts - Управление аккаунтами
+- 📈 Markets - Топ маркетов
+- 💹 Trade - Новый трейд
+- 🎯 Strategies - Стратегии
+- 🔔 Alerts - Алерты
 
-## 📄 License
+## Лимиты
 
-MIT
+⚠️ **Тестовый лимит: $10 суммарно**
+
+Для безопасности в тестовом режиме установлен лимит на максимальную сумму сделок.
+
+## Разработка
+
+```bash
+# Логи всех сервисов
+make logs
+
+# Логи конкретного сервиса
+make logs-api
+make logs-predict
+make logs-strategy
+make logs-telegram
+
+# Статус сервисов
+make status
+
+# Shell в контейнеры
+make shell-api
+make shell-db
+make shell-ch
+
+# Локальная разработка
+make dev-api   # Web API на localhost:8001
+make dev-ui    # Web UI на localhost:3000
+```
+
+## TODO
+
+- [ ] Polymarket интеграция
+- [ ] Больше стратегий (arbitrage, market maker)
+- [ ] Бэктестинг
+- [ ] Аналитика и отчёты
+- [ ] Шифрование приватных ключей
+- [ ] Rate limiting
+- [ ] Алерты в Telegram при событиях
+
+## Стек
+
+- **Frontend:** Next.js 15, React 19, TailwindCSS, shadcn/ui
+- **Backend:** Python FastAPI, Golang
+- **Event Bus:** Redis Streams
+- **Databases:** PostgreSQL, ClickHouse
+- **Bot:** Python aiogram 3
+- **Deploy:** Docker Compose

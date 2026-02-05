@@ -1,29 +1,32 @@
--- Initialize Delta Neutral Strategy
--- This creates the strategy in the database
+-- Initialize Delta Neutral strategy
+-- Run after adding test accounts
 
-INSERT INTO strategies (id, name, active, config, active_accounts, created_at, updated_at)
-VALUES (
-	'delta-neutral-001',
-	'delta_neutral_v1',
-	true,
-	'{
-		"pairs": [
-			{
-				"primary": "account1",
-				"hedge": "account2"
-			}
-		],
-		"target_platform": "predict",
-		"price_adjustment": 0.0,
-		"max_position_size": 1000,
-		"auto_rebalance": true
-	}'::jsonb,
-	ARRAY['account1', 'account2'],
-	NOW(),
-	NOW()
+-- Get account IDs
+WITH account_ids AS (
+    SELECT 
+        (SELECT id FROM accounts WHERE tags @> ARRAY['primary'] LIMIT 1) AS primary_id,
+        (SELECT id FROM accounts WHERE tags @> ARRAY['hedge'] LIMIT 1) AS hedge_id
 )
-ON CONFLICT (name) DO UPDATE
-SET 
-	config = EXCLUDED.config,
-	active_accounts = EXCLUDED.active_accounts,
-	updated_at = NOW();
+INSERT INTO strategies (name, type, config, enabled)
+SELECT 
+    'Delta Neutral - Test',
+    'delta_neutral',
+    jsonb_build_object(
+        'pairs', jsonb_build_array(
+            jsonb_build_object(
+                'primary', primary_id::text,
+                'hedge', hedge_id::text
+            )
+        ),
+        'target_platform', 'predict',
+        'price_adjustment', 0.0,
+        'max_position_size', 10.0,
+        'max_total_exposure', 10.0
+    ),
+    false  -- Disabled by default, enable manually
+FROM account_ids
+WHERE primary_id IS NOT NULL AND hedge_id IS NOT NULL
+ON CONFLICT DO NOTHING;
+
+-- Show result
+SELECT id, name, type, enabled, config FROM strategies WHERE type = 'delta_neutral';
