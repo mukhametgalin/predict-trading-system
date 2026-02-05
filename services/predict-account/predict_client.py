@@ -6,7 +6,6 @@ import logging
 from typing import Optional, Dict, Any
 from eth_account import Account
 from eth_account.messages import encode_defunct
-from web3 import Web3
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +31,10 @@ class PredictClient:
             )
             response.raise_for_status()
             data = response.json()
-            # API returns {success: true, data: {message: "..."}}
             return data["data"]["message"]
     
     async def get_jwt(self, signer: str, signature: str, message: str) -> str:
         """Get JWT token with signed message"""
-        # Predict expects signature as 0x-prefixed hex string
         if signature and not signature.startswith("0x"):
             signature = "0x" + signature
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -52,7 +49,6 @@ class PredictClient:
             )
             response.raise_for_status()
             data = response.json()
-            # API usually returns {success: true, data: {token: "..."}}
             if isinstance(data, dict) and "data" in data and isinstance(data["data"], dict):
                 return data["data"].get("token") or data["data"].get("jwt")
             return data.get("token") or data.get("jwt")
@@ -94,13 +90,7 @@ class PredictClient:
         raise last_err
     
     async def get_orderbook(self, market_id: str) -> Dict[str, Any]:
-        """Get market orderbook.
-
-        Predict docs mention `GET /orderbook/{marketId}` but some deployments use
-        `GET /v1/markets/{marketId}/orderbook`.
-
-        We try multiple known variants.
-        """
+        """Get market orderbook."""
         paths = [
             f"/v1/markets/{market_id}/orderbook",
             f"/orderbook/{market_id}",
@@ -134,26 +124,89 @@ class PredictClient:
         price: float,
         shares: float,
         proxy_url: Optional[str] = None,
+        private_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Create order on Predict.fun"""
+        """Create order on Predict.fun using SDK for EIP-712 signing."""
+        from predict_sdk import OrderBuilder, ChainId
+        from predict_sdk.types import BuildOrderInput, LimitHelperInput
+        from predict_sdk.constants import Side as SDKSide
+
+        if not private_key:
+            raise ValueError("private_key required for order creation")
+
+        # Get market details for fee and token info
+        market = await self.get_market(market_id)
+        fee_bps = market.get("feeRateBps", 200)
+        is_neg_risk = market.get("isNegRisk", False)
+        is_yield_bearing = market.get("isYieldBearing", False)
+
+        # Find token_id for the outcome
+        token_id = None
+        target_name = "yes" if side.lower() == "yes" else "no"
+        for o in market.get("outcomes", []):
+            name = str(o.get("name") or o.get("title") or "").lower()
+            if name == target_name:
+                token_id = o.get("onChainId") or o.get("tokenId") or o.get("id")
+                break
+
+        if not token_id:
+            raise ValueError(f"Could not find token_id for outcome '{side}'")
+
+        # Create order builder
+        builder = OrderBuilder.make(ChainId.BNB_MAINNET, private_key)
+
+        # Calculate amounts (SDK uses 1e18 scale)
+        sdk_side = SDKSide.BUY if side.lower() == "yes" else SDKSide.SELL
+        helper = LimitHelperInput(
+            side=sdk_side,
+            price_per_share_wei=int(price * 1e18),
+            quantity_wei=int(shares * 1e18),
+        )
+        amounts = builder.get_limit_order_amounts(helper)
+
         # Build order
-        order_data = {
-            "marketId": market_id,
-            "outcomeId": outcome_id,
-            "side": side.upper(),  # YES or NO
-            "price": str(price),
-            "size": str(shares),
+        order_input = BuildOrderInput(
+            side=sdk_side,
+            token_id=str(token_id),
+            maker_amount=amounts.maker_amount,
+            taker_amount=amounts.taker_amount,
+            fee_rate_bps=fee_bps,
+        )
+        order = builder.build_order("LIMIT", order_input)
+
+        # Build typed data and sign
+        typed_data = builder.build_typed_data(
+            order, is_neg_risk=is_neg_risk, is_yield_bearing=is_yield_bearing
+        )
+        signed_order = builder.sign_typed_data_order(typed_data)
+
+        # Build API payload
+        payload = {
+            "order": {
+                "salt": str(order.salt),
+                "maker": order.maker,
+                "signer": order.signer,
+                "taker": order.taker,
+                "tokenId": str(order.token_id),
+                "makerAmount": str(order.maker_amount),
+                "takerAmount": str(order.taker_amount),
+                "expiration": str(order.expiration),
+                "nonce": str(order.nonce),
+                "feeRateBps": str(order.fee_rate_bps),
+                "side": order.side.value,
+                "signatureType": order.signature_type.value,
+            },
+            "signature": signed_order.signature,
         }
-        
+
         headers = {
             **self.headers,
             "Authorization": f"Bearer {jwt}",
+            "Content-Type": "application/json",
         }
-        
-        # Create HTTP client with proxy if provided
+
         client_kwargs = {"timeout": 60.0}
         if proxy_url:
-            # httpx>=0.28 uses `proxy=` instead of `proxies=`
             client_kwargs["proxy"] = proxy_url
 
         last_err = None
@@ -162,9 +215,11 @@ class PredictClient:
                 async with httpx.AsyncClient(**client_kwargs) as client:
                     response = await client.post(
                         f"{self.base_url}/v1/orders",
-                        json=order_data,
+                        json=payload,
                         headers=headers,
                     )
+                    if response.status_code >= 400:
+                        logger.error(f"Order API error: {response.status_code} {response.text}")
                     response.raise_for_status()
                     return response.json()
             except (httpx.TransportError, httpx.HTTPStatusError) as e:
@@ -174,10 +229,7 @@ class PredictClient:
         raise last_err
     
     async def get_positions(self, address: str, jwt: Optional[str] = None) -> list[Dict[str, Any]]:
-        """Get positions for address.
-
-        Predict API requires Authorization header.
-        """
+        """Get positions for address."""
         headers = dict(self.headers)
         if jwt:
             headers["Authorization"] = f"Bearer {jwt}"

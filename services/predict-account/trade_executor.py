@@ -86,6 +86,7 @@ async def execute_trade(
         price=trade_request.price,
         shares=trade_request.shares,
         proxy_url=None,  # disable proxy for first money test to avoid timeouts
+        private_key=account.private_key,
     )
     
     order_hash = result.get("hash") or result.get("orderHash")
