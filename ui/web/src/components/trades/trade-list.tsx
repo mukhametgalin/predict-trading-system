@@ -5,6 +5,18 @@ import { Button } from '@/components/ui/button'
 import { RefreshCw } from 'lucide-react'
 import type { TradeSummary } from '@/lib/api'
 
+const PREDICT_WEB_URL = process.env.NEXT_PUBLIC_PREDICT_WEB_URL || 'https://predict.fun'
+
+function predictMarketUrl(marketId: string) {
+  // Best-effort: URL format may change; keep this configurable
+  return `${PREDICT_WEB_URL}/markets/${marketId}`
+}
+
+function predictOrderUrl(orderHash: string) {
+  // Best-effort: not guaranteed, but useful if predict site supports it
+  return `${PREDICT_WEB_URL}/orders/${orderHash}`
+}
+
 interface TradeListProps {
   trades: TradeSummary[]
   onRefresh: () => void
@@ -42,7 +54,7 @@ export function TradeList({ trades, onRefresh }: TradeListProps) {
                 </div>
 
                 <div className="text-sm text-muted-foreground font-mono break-all">
-                  market: {t.market_id}
+                  market: <a className="underline" href={predictMarketUrl(t.market_id)} target="_blank" rel="noreferrer">{t.market_id}</a>
                 </div>
 
                 <div className="flex items-center justify-between">
@@ -52,7 +64,7 @@ export function TradeList({ trades, onRefresh }: TradeListProps) {
                   </div>
                   {t.order_hash ? (
                     <div className="text-xs text-muted-foreground font-mono">
-                      hash: {t.order_hash.slice(0, 10)}…{t.order_hash.slice(-8)}
+                      hash: <a className="underline" href={predictOrderUrl(t.order_hash)} target="_blank" rel="noreferrer">{t.order_hash.slice(0, 10)}…{t.order_hash.slice(-8)}</a>
                     </div>
                   ) : null}
                 </div>
