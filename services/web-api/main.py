@@ -428,6 +428,18 @@ async def execute_trade(data: TradeRequest):
         raise HTTPException(500, str(e))
 
 
+@app.get("/orders/{platform}/{account_id}")
+async def get_orders(platform: str, account_id: str, limit: int = Query(default=50, le=200)):
+    """Get recent orders for account."""
+    if platform == "predict":
+        return await predict_service.get_orders(account_id, limit=limit)
+    elif platform == "polymarket":
+        # not implemented
+        return []
+    else:
+        raise HTTPException(400, f"Unknown platform: {platform}")
+
+
 @app.get("/positions/{platform}/{account_id}")
 async def get_positions(platform: str, account_id: str):
     """Get account positions"""

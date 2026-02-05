@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { StatsCards } from '@/components/dashboard/stats-cards'
 import { AccountList } from '@/components/accounts/account-list'
+import { PositionsList } from '@/components/positions/positions-list'
+import { OrdersList } from '@/components/orders/orders-list'
 import { StrategyList } from '@/components/strategies/strategy-list'
 import { MarketList } from '@/components/markets/market-list'
 import { AlertList } from '@/components/alerts/alert-list'
@@ -11,6 +13,8 @@ import { TradeList } from '@/components/trades/trade-list'
 import {
   getStats,
   getAccounts,
+  getPositions,
+  getOrders,
   getStrategies,
   getMarkets,
   getAlerts,
@@ -26,6 +30,8 @@ import {
 export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [positions, setPositions] = useState<Record<string, any[]>>({})
+  const [orders, setOrders] = useState<Record<string, any[]>>({})
   const [strategies, setStrategies] = useState<Strategy[]>([])
   const [markets, setMarkets] = useState<Market[]>([])
   const [alerts, setAlerts] = useState<Alert[]>([])
@@ -42,14 +48,40 @@ export default function Dashboard() {
     }
   }, [])
 
+  const loadAccountTelemetry = useCallback(async (accs: Account[]) => {
+    const pos: Record<string, any[]> = {}
+    const ord: Record<string, any[]> = {}
+
+    await Promise.all(
+      accs
+        .filter((a) => a.platform === 'predict')
+        .map(async (a) => {
+          try {
+            pos[a.id] = await getPositions(a.platform, a.id)
+          } catch {
+            pos[a.id] = []
+          }
+          try {
+            ord[a.id] = await getOrders(a.platform, a.id, 50)
+          } catch {
+            ord[a.id] = []
+          }
+        })
+    )
+
+    setPositions(pos)
+    setOrders(ord)
+  }, [])
+
   const loadAccounts = useCallback(async () => {
     try {
       const data = await getAccounts()
       setAccounts(data)
+      await loadAccountTelemetry(data)
     } catch (err) {
       console.error('Failed to load accounts:', err)
     }
-  }, [])
+  }, [loadAccountTelemetry])
 
   const loadStrategies = useCallback(async () => {
     try {
@@ -104,7 +136,6 @@ export default function Dashboard() {
       .finally(() => setLoading(false))
   }, [loadStats, loadAccounts, loadStrategies, loadMarkets, loadAlerts, loadTrades])
 
-  // WebSocket connection for real-time updates
   useEffect(() => {
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8001/ws'
     let ws: WebSocket | null = null
@@ -120,8 +151,7 @@ export default function Dashboard() {
         try {
           const message = JSON.parse(event.data)
           console.log('WS message:', message)
-          
-          // Refresh relevant data on events
+
           if (message.type === 'trade_events' || message.type === 'fill_events') {
             loadStats()
             loadAccounts()
@@ -147,9 +177,7 @@ export default function Dashboard() {
     connect()
 
     return () => {
-      if (ws) {
-        ws.close()
-      }
+      if (ws) ws.close()
     }
   }, [loadStats, loadAccounts, loadTrades])
 
@@ -184,13 +212,15 @@ export default function Dashboard() {
           <TabsList>
             <TabsTrigger value="accounts">Accounts</TabsTrigger>
             <TabsTrigger value="strategies">Strategies</TabsTrigger>
+            <TabsTrigger value="positions">Positions</TabsTrigger>
+            <TabsTrigger value="orders">Orders</TabsTrigger>
             <TabsTrigger value="markets">Markets</TabsTrigger>
             <TabsTrigger value="trades">Trades</TabsTrigger>
             <TabsTrigger value="alerts">
               Alerts
-              {alerts.filter(a => !a.read).length > 0 && (
+              {alerts.filter((a) => !a.read).length > 0 && (
                 <span className="ml-2 bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
-                  {alerts.filter(a => !a.read).length}
+                  {alerts.filter((a) => !a.read).length}
                 </span>
               )}
             </TabsTrigger>
@@ -202,6 +232,32 @@ export default function Dashboard() {
 
           <TabsContent value="strategies">
             <StrategyList strategies={strategies} onRefresh={loadStrategies} />
+          </TabsContent>
+
+          <TabsContent value="positions">
+            <div className="space-y-4">
+              {accounts
+                .filter((a) => a.platform === 'predict')
+                .map((a) => (
+                  <div key={a.id}>
+                    <div className="text-sm text-muted-foreground mb-2">{a.name}</div>
+                    <PositionsList positions={(positions[a.id] || []) as any} />
+                  </div>
+                ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="orders">
+            <div className="space-y-4">
+              {accounts
+                .filter((a) => a.platform === 'predict')
+                .map((a) => (
+                  <div key={a.id}>
+                    <div className="text-sm text-muted-foreground mb-2">{a.name}</div>
+                    <OrdersList orders={(orders[a.id] || []) as any} />
+                  </div>
+                ))}
+            </div>
           </TabsContent>
 
           <TabsContent value="markets">

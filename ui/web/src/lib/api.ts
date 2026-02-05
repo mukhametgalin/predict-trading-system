@@ -67,6 +67,11 @@ export async function getTrades(accountId?: string, limit = 50) {
   return request<TradeSummary[]>(`/trades?${params}`)
 }
 
+export async function getOrders(platform: string, accountId: string, limit = 50) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  return request<any[]>(`/orders/${platform}/${accountId}?${params}`)
+}
+
 export async function getPositions(platform: string, accountId: string) {
   return request<Position[]>(`/positions/${platform}/${accountId}`)
 }

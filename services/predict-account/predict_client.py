@@ -94,21 +94,35 @@ class PredictClient:
         raise last_err
     
     async def get_orderbook(self, market_id: str) -> Dict[str, Any]:
-        """Get market orderbook"""
+        """Get market orderbook.
+
+        Predict docs mention `GET /orderbook/{marketId}` but some deployments use
+        `GET /v1/markets/{marketId}/orderbook`.
+
+        We try multiple known variants.
+        """
+        paths = [
+            f"/v1/markets/{market_id}/orderbook",
+            f"/orderbook/{market_id}",
+            f"/v1/orderbook/{market_id}",
+        ]
+
         last_err = None
         for attempt in range(3):
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.get(
-                        f"{self.base_url}/v1/markets/{market_id}/orderbook",
-                        headers=self.headers,
-                    )
-                    response.raise_for_status()
-                    data = response.json()
-                    return data.get("data", data)
-            except (httpx.TransportError, httpx.HTTPStatusError) as e:
-                last_err = e
-                await asyncio.sleep(0.5 * (attempt + 1))
+            for p in paths:
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        response = await client.get(
+                            f"{self.base_url}{p}",
+                            headers=self.headers,
+                        )
+                        response.raise_for_status()
+                        data = response.json()
+                        return data.get("data", data)
+                except (httpx.TransportError, httpx.HTTPStatusError) as e:
+                    last_err = e
+            await asyncio.sleep(0.5 * (attempt + 1))
+
         raise last_err
     
     async def create_order(

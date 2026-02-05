@@ -23,6 +23,7 @@ from schemas import (
 )
 from predict_client import PredictClient
 from event_publisher import EventPublisher
+from close_all import build_close_all_plan
 
 # Logging
 logging.basicConfig(level=logging.INFO)
@@ -293,6 +294,85 @@ async def execute_trade(
         })
         
         raise HTTPException(status_code=500, detail=err_text)
+
+
+@app.post("/accounts/{account_id}/close-all")
+async def close_all_positions(
+    account_id: str,
+    confirm: bool = False,
+    slippage_bps: int = 100,
+    db: AsyncSession = Depends(get_db),
+):
+    """Close ALL positions on an account (market close).
+
+    This is the top-level safety tool you asked for.
+
+    - confirm=false: returns a plan (no trading)
+    - confirm=true: NOT implemented yet (will be wired to predict-sdk MARKET orders)
+    """
+    from crud import get_account
+
+    account = await get_account(db, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    client = PredictClient(api_key=account.api_key) if account.api_key else predict_client
+    jwt = await client.authenticate(account.private_key)
+
+    positions = await client.get_positions(account.address, jwt=jwt)
+    plan = build_close_all_plan(positions)
+
+    if not confirm:
+        # Persist a dry-run trade event for audit trail
+        await event_publisher.publish_trade_event(
+            "close_all_dry_run",
+            {
+                "account_id": account.id,
+                "account_name": account.name,
+                "count": len(plan),
+                "slippage_bps": slippage_bps,
+            },
+        )
+        return {
+            "status": "dry_run",
+            "account_id": account.id,
+            "account_name": account.name,
+            "positions": positions,
+            "plan": [p.__dict__ for p in plan],
+            "slippage_bps": slippage_bps,
+            "message": "DRY RUN: close-all plan computed. Set confirm=true to execute (not implemented yet).",
+        }
+
+    raise HTTPException(
+        status_code=501,
+        detail="close-all confirm=true not implemented yet (needs verified MARKET order payload)",
+    )
+
+
+@app.get("/orders/{account_id}")
+async def get_orders(
+    account_id: str,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get recent orders for account address (Predict API)."""
+    from crud import get_account
+
+    account = await get_account(db, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    try:
+        client = PredictClient(api_key=account.api_key) if account.api_key else predict_client
+        jwt = await client.authenticate(account.private_key)
+        orders = await client.get_orders(account.address, jwt=jwt)
+        # best-effort limit
+        if isinstance(orders, list):
+            return orders[: max(1, min(limit, 200))]
+        return orders
+    except Exception as e:
+        logger.error(f"Failed to get orders: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/positions/{account_id}", response_model=list[PositionResponse])
