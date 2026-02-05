@@ -82,7 +82,7 @@ class TradeRequest(BaseModel):
 
 
 class TradeResponse(BaseModel):
-    trade_id: str
+    trade_id: Optional[str] = None
     status: str
     message: str
     order_hash: Optional[str] = None
@@ -114,6 +114,13 @@ class StrategyDetail(BaseModel):
 
 
 # ===== Alerts =====
+
+class AlertCreate(BaseModel):
+    type: str
+    title: str
+    message: str
+    data: dict | None = None
+
 
 class AlertResponse(BaseModel):
     id: str

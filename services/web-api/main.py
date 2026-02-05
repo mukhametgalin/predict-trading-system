@@ -31,6 +31,7 @@ from schemas import (
     StrategyCreate,
     StrategyUpdate,
     StrategyDetail,
+    AlertCreate,
     AlertResponse,
     MarketSummary,
 )
@@ -748,6 +749,29 @@ async def delete_strategy(strategy_id: str, db: AsyncSession = Depends(get_db)):
 
 
 # ===== Alerts =====
+
+@app.post("/alerts", response_model=dict)
+async def create_alert(alert: AlertCreate):
+    """Create an alert (internal helper endpoint)."""
+    import json
+
+    async for db in get_db():
+        await db.execute(
+            text(
+                "INSERT INTO alerts (type, title, message, data) VALUES (:type, :title, :message, CAST(:data AS jsonb))"
+            ),
+            {
+                "type": alert.type,
+                "title": alert.title,
+                "message": alert.message,
+                "data": json.dumps(alert.data or {}),
+            },
+        )
+        await db.commit()
+        break
+
+    return {"status": "ok"}
+
 
 @app.get("/alerts", response_model=list[AlertResponse])
 async def list_alerts(
