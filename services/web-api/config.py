@@ -4,6 +4,10 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    # Predict.fun (for market sync)
+    predict_api_key: str = ""
+    predict_api_url: str = "https://api.predict.fun"
+
     # PostgreSQL
     postgres_host: str = "postgres"
     postgres_port: int = 5432

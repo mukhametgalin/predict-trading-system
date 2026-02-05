@@ -10,6 +10,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Optional
 
+import httpx
+
 import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -368,6 +370,93 @@ async def list_trades(
 
 # ===== Markets =====
 
+@app.post("/markets/sync")
+async def sync_markets(
+    limit: int = Query(default=50, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fetch markets from Predict.fun and upsert into ClickHouse.
+
+    NOTE: Intentionally minimal: we only ingest basic metadata. Prices/volume/liquidity
+    are set to 0 for now (until we add orderbook/price ingestion).
+
+    Auth: uses Settings.predict_api_key if set, otherwise tries to reuse a per-account
+    api_key from predict-account DB.
+    """
+    api_key = settings.predict_api_key
+    if not api_key:
+        # fallback to any stored per-account api key
+        res = await db.execute(text("""
+            SELECT api_key
+            FROM predict_accounts
+            WHERE api_key IS NOT NULL AND api_key <> ''
+            LIMIT 1
+        """))
+        row = res.fetchone()
+        api_key = row[0] if row else ""
+
+    if not api_key:
+        raise HTTPException(500, "No Predict API key found (set PREDICT_API_KEY or store api_key on an account)")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.get(
+            f"{settings.predict_api_url}/v1/markets",
+            params={"limit": limit},
+            headers={
+                "x-api-key": api_key,
+                "User-Agent": "Mozilla/5.0",
+            },
+        )
+        r.raise_for_status()
+        payload = r.json()
+
+    markets = payload.get("data") or []
+    ch = get_clickhouse()
+
+    column_names = [
+        "market_id",
+        "platform",
+        "question",
+        "category",
+        "end_date",
+        "liquidity",
+        "volume",
+        "yes_price",
+        "no_price",
+    ]
+
+    rows: list[list] = []
+    def _parse_dt(s: str | None):
+        if not s:
+            return datetime.utcfromtimestamp(0)
+        try:
+            # Handle 'Z'
+            if s.endswith('Z'):
+                s = s[:-1] + '+00:00'
+            return datetime.fromisoformat(s)
+        except Exception:
+            return datetime.utcfromtimestamp(0)
+
+    for m in markets:
+        created_at = _parse_dt(m.get("createdAt"))
+        rows.append([
+            str(m.get("id")),
+            "predict",
+            m.get("question") or m.get("title") or "",
+            m.get("categorySlug") or "",
+            created_at,
+            0.0,  # liquidity
+            0.0,  # volume
+            0.0,  # yes_price
+            0.0,  # no_price
+        ])
+
+    if rows:
+        ch.insert("markets.markets", rows, column_names=column_names)
+
+    return {"inserted": len(rows)}
+
+
 @app.get("/markets", response_model=list[MarketSummary])
 async def list_markets(
     platform: Optional[str] = None,
@@ -378,7 +467,7 @@ async def list_markets(
     try:
         ch = get_clickhouse()
         
-        query = "SELECT * FROM markets"
+        query = "SELECT * FROM markets.markets"
         conditions = []
         params = {}
         
@@ -404,10 +493,11 @@ async def list_markets(
                 platform=row[1],
                 question=row[2],
                 category=row[3],
-                yes_price=row[5],
-                no_price=row[6],
-                volume_24h=row[4],
-                liquidity=row[4],
+                # schema: market_id, platform, question, category, end_date, liquidity, volume, yes_price, no_price, updated_at
+                yes_price=row[7],
+                no_price=row[8],
+                volume_24h=row[6],
+                liquidity=row[5],
             ))
         
         return markets

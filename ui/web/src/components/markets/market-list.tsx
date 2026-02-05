@@ -2,8 +2,10 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Download } from 'lucide-react'
 import type { Market } from '@/lib/api'
+import { syncMarkets } from '@/lib/api'
+import { useState } from 'react'
 
 interface MarketListProps {
   markets: Market[]
@@ -11,14 +13,32 @@ interface MarketListProps {
 }
 
 export function MarketList({ markets, onRefresh }: MarketListProps) {
+  const [syncing, setSyncing] = useState(false)
+
+  const onSync = async () => {
+    setSyncing(true)
+    try {
+      await syncMarkets(50)
+      await onRefresh()
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>Markets</CardTitle>
-        <Button variant="outline" size="sm" onClick={onRefresh}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={onSync} disabled={syncing}>
+            <Download className="h-4 w-4 mr-2" />
+            {syncing ? 'Syncing…' : 'Sync'}
+          </Button>
+          <Button variant="outline" size="sm" onClick={onRefresh}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         {markets.length === 0 ? (

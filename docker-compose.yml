@@ -171,6 +171,8 @@ services:
       STRATEGY_ENGINE_URL: http://strategy-engine:8080
       PREDICT_ACCOUNT_URL: http://predict-account:8000
       POLYMARKET_ACCOUNT_URL: http://polymarket-account:8000
+      PREDICT_API_KEY: ${PREDICT_API_KEY}
+      PREDICT_API_URL: ${PREDICT_API_URL:-https://api.predict.fun}
     depends_on:
       postgres:
         condition: service_healthy

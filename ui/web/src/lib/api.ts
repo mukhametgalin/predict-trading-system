@@ -74,6 +74,13 @@ export async function getMarkets(platform?: string, limit = 50) {
   return request<Market[]>(`/markets?${params}`)
 }
 
+export async function syncMarkets(limit = 50) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  return request<{ inserted: number }>(`/markets/sync?${params}`, {
+    method: 'POST',
+  })
+}
+
 // Strategies
 export async function getStrategies() {
   return request<Strategy[]>('/strategies')
