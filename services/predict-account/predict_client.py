@@ -159,24 +159,37 @@ class PredictClient:
 
         raise last_err
     
-    async def get_positions(self, address: str) -> list[Dict[str, Any]]:
-        """Get positions for address"""
+    async def get_positions(self, address: str, jwt: Optional[str] = None) -> list[Dict[str, Any]]:
+        """Get positions for address.
+
+        Predict API requires Authorization header.
+        """
+        headers = dict(self.headers)
+        if jwt:
+            headers["Authorization"] = f"Bearer {jwt}"
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
                 f"{self.base_url}/v1/positions",
                 params={"address": address},
-                headers=self.headers,
+                headers=headers,
             )
             response.raise_for_status()
-            return response.json()
-    
-    async def get_orders(self, address: str) -> list[Dict[str, Any]]:
-        """Get orders for address"""
+            data = response.json()
+            return data.get("data", data)
+
+    async def get_orders(self, address: str, jwt: Optional[str] = None) -> list[Dict[str, Any]]:
+        """Get orders for address."""
+        headers = dict(self.headers)
+        if jwt:
+            headers["Authorization"] = f"Bearer {jwt}"
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
                 f"{self.base_url}/v1/orders",
                 params={"address": address},
-                headers=self.headers,
+                headers=headers,
             )
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            return data.get("data", data)

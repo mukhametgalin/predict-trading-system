@@ -309,7 +309,9 @@ async def get_positions(
     
     # Get positions from Predict.fun API
     try:
-        positions = await predict_client.get_positions(account.address)
+        client = PredictClient(api_key=account.api_key) if account.api_key else predict_client
+        jwt = await client.authenticate(account.private_key)
+        positions = await client.get_positions(account.address, jwt=jwt)
         return positions
     except Exception as e:
         logger.error(f"Failed to get positions: {e}")
