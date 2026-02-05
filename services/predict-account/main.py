@@ -224,29 +224,56 @@ async def execute_trade(
             account=account,
             trade_request=trade_request,
         )
-        
+
+        # Persist trade (so UI can display history even for dry-run)
+        from crud import create_trade as db_create_trade
+
+        trade_row = await db_create_trade(
+            db,
+            account_id=account.id,
+            account_name=account.name,
+            market_id=trade_request.market_id,
+            outcome_id=result.get("outcome_id") or "",
+            side=trade_request.side,
+            price=trade_request.price,
+            shares=trade_request.shares,
+            order_hash=result.get("order_hash"),
+        )
+        # Reflect status on the DB row
+        if result.get("status") == "dry_run":
+            trade_row.status = "dry_run"
+        else:
+            trade_row.status = result.get("status") or "submitted"
+        await db.commit()
+
         # Publish event (avoid emitting "executed" on dry-run)
         if result.get("status") == "dry_run":
-            await event_publisher.publish_trade_event("trade_dry_run", {
-                "account_id": account.id,
-                "account_name": account.name,
-                "market_id": trade_request.market_id,
-                "side": trade_request.side,
-                "price": trade_request.price,
-                "shares": trade_request.shares,
-                "platform": "predict",
-            })
+            await event_publisher.publish_trade_event(
+                "trade_dry_run",
+                {
+                    "account_id": account.id,
+                    "account_name": account.name,
+                    "market_id": trade_request.market_id,
+                    "side": trade_request.side,
+                    "price": trade_request.price,
+                    "shares": trade_request.shares,
+                    "platform": "predict",
+                },
+            )
         else:
-            await event_publisher.publish_trade_event("trade_executed", {
-                "account_id": account.id,
-                "account_name": account.name,
-                "market_id": trade_request.market_id,
-                "side": trade_request.side,
-                "price": trade_request.price,
-                "shares": trade_request.shares,
-                "order_hash": result.get("order_hash"),
-                "platform": "predict",
-            })
+            await event_publisher.publish_trade_event(
+                "trade_executed",
+                {
+                    "account_id": account.id,
+                    "account_name": account.name,
+                    "market_id": trade_request.market_id,
+                    "side": trade_request.side,
+                    "price": trade_request.price,
+                    "shares": trade_request.shares,
+                    "order_hash": result.get("order_hash"),
+                    "platform": "predict",
+                },
+            )
 
         return result
         

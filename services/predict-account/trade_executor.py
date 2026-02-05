@@ -23,35 +23,9 @@ async def execute_trade(
     else:
         client = predict_client
     
-    # Dry-run check
-    if not trade_request.confirm:
-        # Get market details for dry-run
-        market = await client.get_market(trade_request.market_id)
-        orderbook = await client.get_orderbook(trade_request.market_id)
-        
-        return {
-            "trade_id": None,
-            "account_id": account.id,
-            "account_name": account.name,
-            "market_id": trade_request.market_id,
-            "side": trade_request.side,
-            "price": trade_request.price,
-            "shares": trade_request.shares,
-            "order_hash": None,
-            "status": "dry_run",
-            "message": f"DRY RUN: Would place {trade_request.side.upper()} order for {trade_request.shares} shares @ {trade_request.price}. "
-                       f"Market: {market.get('title', 'Unknown')}. "
-                       f"Current orderbook depth: {len(orderbook.get('bids', []))} bids, {len(orderbook.get('asks', []))} asks. "
-                       f"Repeat with confirm=true to execute.",
-        }
-    
-    # Authenticate
-    logger.info(f"Authenticating account {account.name} ({account.address})")
-    jwt = await client.authenticate(account.private_key)
-    
-    # Get market to find outcome ID
+    # Get market to find outcome ID (needed for both dry-run and confirm)
     market = await client.get_market(trade_request.market_id)
-    
+
     # Find outcome ID based on side
     outcome_id = None
     desired_name = "Yes" if trade_request.side.lower() == "yes" else "No"
@@ -59,9 +33,47 @@ async def execute_trade(
         if str(outcome.get("name", "")).lower() == desired_name.lower():
             outcome_id = outcome.get("onChainId") or outcome.get("id")
             break
-    
+
     if not outcome_id:
-        raise ValueError(f"Could not find outcome for side '{trade_request.side}' in market {trade_request.market_id}")
+        raise ValueError(
+            f"Could not find outcome for side '{trade_request.side}' in market {trade_request.market_id}"
+        )
+
+    # Dry-run check
+    if not trade_request.confirm:
+        # Orderbook is best-effort; may fail for some markets.
+        orderbook_depth_text = ""
+        try:
+            orderbook = await client.get_orderbook(trade_request.market_id)
+            orderbook_depth_text = (
+                f" Current orderbook depth: {len(orderbook.get('bids', []))} bids, "
+                f"{len(orderbook.get('asks', []))} asks."
+            )
+        except Exception:
+            pass
+
+        return {
+            "trade_id": None,
+            "account_id": account.id,
+            "account_name": account.name,
+            "market_id": trade_request.market_id,
+            "outcome_id": outcome_id,
+            "side": trade_request.side,
+            "price": trade_request.price,
+            "shares": trade_request.shares,
+            "order_hash": None,
+            "status": "dry_run",
+            "message": (
+                f"DRY RUN: Would place {trade_request.side.upper()} order for {trade_request.shares} shares @ {trade_request.price}. "
+                f"Market: {market.get('title', 'Unknown')}."
+                f"{orderbook_depth_text}"
+                " Repeat with confirm=true to execute."
+            ),
+        }
+
+    # Authenticate
+    logger.info(f"Authenticating account {account.name} ({account.address})")
+    jwt = await client.authenticate(account.private_key)
     
     # Create order
     logger.info(f"Creating order: {trade_request.side.upper()} {trade_request.shares} @ {trade_request.price}")
@@ -85,6 +97,7 @@ async def execute_trade(
         "account_id": account.id,
         "account_name": account.name,
         "market_id": trade_request.market_id,
+        "outcome_id": outcome_id,
         "side": trade_request.side,
         "price": trade_request.price,
         "shares": trade_request.shares,
