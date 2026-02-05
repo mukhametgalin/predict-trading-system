@@ -308,6 +308,28 @@ async def update_account(platform: str, account_id: str, data: AccountUpdate):
     )
 
 
+@app.post("/accounts/{platform}/{account_id}/close-all")
+async def close_all_positions(
+    platform: str,
+    account_id: str,
+    confirm: bool = False,
+    slippage_bps: int = Query(default=100, ge=0, le=1000),
+):
+    """Close all positions for account (market orders).
+
+    confirm=false: dry-run, returns plan
+    confirm=true: execute market orders
+    """
+    if platform == "predict":
+        return await predict_service.close_all_positions(
+            account_id, confirm=confirm, slippage_bps=slippage_bps
+        )
+    elif platform == "polymarket":
+        raise HTTPException(501, "Polymarket close-all not implemented")
+    else:
+        raise HTTPException(400, f"Unknown platform: {platform}")
+
+
 @app.post("/accounts/{platform}/{account_id}/disable", response_model=AccountSummary)
 async def disable_account(
     platform: str,

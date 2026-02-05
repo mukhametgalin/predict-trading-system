@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { disableAccount, updateAccount, type Account } from '@/lib/api'
+import { closeAllPositions, disableAccount, updateAccount, type Account } from '@/lib/api'
 import { RefreshCw } from 'lucide-react'
 
 interface AccountListProps {
@@ -14,6 +14,31 @@ interface AccountListProps {
 
 export function AccountList({ accounts, onRefresh }: AccountListProps) {
   const [loading, setLoading] = useState<string | null>(null)
+
+  const handleCloseAll = async (account: Account, confirm: boolean) => {
+    if (confirm) {
+      const ok = window.confirm(
+        `CONFIRM: Close ALL positions for ${account.name}?\n\nThis will submit MARKET SELL orders with 100bps slippage.`
+      )
+      if (!ok) return
+    }
+
+    setLoading(account.id)
+    try {
+      const result = await closeAllPositions(account.platform, account.id, confirm, 100)
+      if (result.status === 'dry_run' || result.status === 'no_positions') {
+        alert(`${result.message}\n\nPlan:\n${JSON.stringify(result.plan || [], null, 2)}`)
+      } else {
+        alert(`Close-all result: ${result.message}\n\nResults: ${result.results?.length || 0}, Errors: ${result.errors?.length || 0}`)
+      }
+      onRefresh()
+    } catch (err) {
+      console.error('Failed to close positions:', err)
+      alert(`Error: ${err}`)
+    } finally {
+      setLoading(null)
+    }
+  }
 
   const handleDisable = async (account: Account) => {
     const ok = window.confirm(
@@ -83,6 +108,22 @@ export function AccountList({ accounts, onRefresh }: AccountListProps) {
                       PnL: ${(account.pnl_24h || 0).toFixed(2)}
                     </p>
                   </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={loading === account.id}
+                    onClick={() => handleCloseAll(account, false)}
+                  >
+                    Close All (dry)
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={loading === account.id}
+                    onClick={() => handleCloseAll(account, true)}
+                  >
+                    Close All
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"

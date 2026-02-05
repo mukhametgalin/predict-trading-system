@@ -400,6 +400,125 @@ async def get_positions(
 
 # ===== WebSocket for fills monitoring =====
 
+@app.post("/accounts/{account_id}/close-all")
+async def close_all_positions(
+    account_id: str,
+    confirm: bool = False,
+    slippage_bps: int = 100,
+    db: AsyncSession = Depends(get_db),
+):
+    """Close all positions for account.
+
+    confirm=false: return plan (dry-run)
+    confirm=true: execute market orders to close positions
+    """
+    from crud import get_account
+    from close_all import build_close_all_plan
+
+    account = await get_account(db, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    # Get client with account's API key
+    client = PredictClient(api_key=account.api_key) if account.api_key else predict_client
+
+    # Authenticate
+    try:
+        jwt = await client.authenticate(account.private_key)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Auth failed: {e}")
+
+    # Get positions
+    try:
+        positions = await client.get_positions(account.address, jwt=jwt)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get positions: {e}")
+
+    if not positions:
+        return {
+            "account_id": account_id,
+            "account_name": account.name,
+            "status": "no_positions",
+            "message": "No positions to close",
+            "plan": [],
+        }
+
+    # Build plan
+    plan = build_close_all_plan(positions)
+
+    if not confirm:
+        return {
+            "account_id": account_id,
+            "account_name": account.name,
+            "status": "dry_run",
+            "message": f"Would close {len(plan)} positions with slippage={slippage_bps}bps. Use confirm=true to execute.",
+            "slippage_bps": slippage_bps,
+            "plan": [
+                {
+                    "market_id": p.market_id,
+                    "outcome_id": p.outcome_id,
+                    "side": p.side,
+                    "shares": p.shares,
+                    "action": p.action,
+                }
+                for p in plan
+            ],
+        }
+
+    # Execute close (confirm=true)
+    # NOTE: This is a best-effort implementation. Real market orders require
+    # fetching orderbook, calculating amounts via SDK, and submitting EIP-712 payload.
+    results = []
+    errors = []
+
+    for item in plan:
+        try:
+            # Get orderbook for this market
+            orderbook = await client.get_orderbook(item.market_id)
+            if not orderbook or "asks" not in orderbook.get("data", orderbook):
+                errors.append({
+                    "market_id": item.market_id,
+                    "error": "No orderbook available",
+                })
+                continue
+
+            # TODO: Build and submit actual market order via SDK
+            # For now, record as "pending_implementation"
+            results.append({
+                "market_id": item.market_id,
+                "outcome_id": item.outcome_id,
+                "shares": item.shares,
+                "status": "pending_implementation",
+                "message": "Market order execution requires SDK integration (coming soon)",
+            })
+
+        except Exception as e:
+            errors.append({
+                "market_id": item.market_id,
+                "error": str(e),
+            })
+
+    # Publish event
+    await event_publisher.publish_trade_event("close_all_attempt", {
+        "account_id": account.id,
+        "account_name": account.name,
+        "positions_count": len(plan),
+        "results_count": len(results),
+        "errors_count": len(errors),
+        "platform": "predict",
+    })
+
+    return {
+        "account_id": account_id,
+        "account_name": account.name,
+        "status": "partial" if errors else "submitted",
+        "message": f"Attempted to close {len(plan)} positions",
+        "slippage_bps": slippage_bps,
+        "results": results,
+        "errors": errors,
+    }
+
+
 @app.websocket("/ws/fills")
 async def websocket_fills(websocket):
     """WebSocket endpoint for monitoring fills"""

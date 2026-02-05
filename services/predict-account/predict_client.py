@@ -207,3 +207,15 @@ class PredictClient:
             response.raise_for_status()
             data = response.json()
             return data.get("data", data)
+
+    async def get_open_markets(self, limit: int = 50) -> list[Dict[str, Any]]:
+        """Get OPEN (active) markets."""
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{self.base_url}/v1/markets",
+                params={"status": "OPEN", "limit": limit},
+                headers=self.headers,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("data", data)

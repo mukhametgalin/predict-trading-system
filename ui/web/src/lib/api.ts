@@ -53,6 +53,14 @@ export async function disableAccount(platform: string, id: string) {
   return request<Account>(`/accounts/${platform}/${id}/disable`, { method: 'POST' })
 }
 
+export async function closeAllPositions(platform: string, id: string, confirm = false, slippageBps = 100) {
+  const params = new URLSearchParams({
+    confirm: String(confirm),
+    slippage_bps: String(slippageBps),
+  })
+  return request<any>(`/accounts/${platform}/${id}/close-all?${params}`, { method: 'POST' })
+}
+
 // Trading
 export async function executeTrade(data: TradeData) {
   return request<TradeResult>('/trade', {

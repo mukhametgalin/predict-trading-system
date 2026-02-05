@@ -78,6 +78,10 @@ class PredictAccountService(ServiceClient):
         params = {"limit": str(limit)}
         return await self.get(f"/orders/{account_id}", params=params)
 
+    async def close_all_positions(self, account_id: str, confirm: bool = False, slippage_bps: int = 100) -> dict:
+        params = {"confirm": str(confirm).lower(), "slippage_bps": str(slippage_bps)}
+        return await self.post(f"/accounts/{account_id}/close-all", params=params)
+
     async def list_trades(self, account_id: str | None = None, limit: int = 50) -> list:
         params = {"limit": str(limit)}
         if account_id:
