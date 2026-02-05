@@ -350,6 +350,22 @@ async def get_positions(platform: str, account_id: str):
         raise HTTPException(400, f"Unknown platform: {platform}")
 
 
+# ===== Trades =====
+
+@app.get("/trades")
+async def list_trades(
+    account_id: str | None = None,
+    limit: int = Query(default=50, le=200),
+):
+    """List recent trades (proxied from account service)"""
+    try:
+        # For now, only Predict trades
+        return await predict_service.list_trades(account_id=account_id, limit=limit)
+    except Exception as e:
+        logger.error(f"Failed to get trades: {e}")
+        return []
+
+
 # ===== Markets =====
 
 @app.get("/markets", response_model=list[MarketSummary])

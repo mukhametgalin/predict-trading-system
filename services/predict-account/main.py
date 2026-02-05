@@ -18,6 +18,7 @@ from schemas import (
     AccountResponse,
     TradeRequest,
     TradeResponse,
+    TradeSummary,
     PositionResponse,
 )
 from predict_client import PredictClient
@@ -184,6 +185,20 @@ async def delete_account(
 
 
 # ===== Trading =====
+
+@app.get("/trades", response_model=list[TradeSummary])
+async def list_trades(
+    account_id: str | None = None,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+):
+    """List recent trades"""
+    from crud import get_trades
+
+    limit = max(1, min(limit, 200))
+    trades = await get_trades(db, account_id=account_id, limit=limit)
+    return trades
+
 
 @app.post("/trade", response_model=TradeResponse)
 async def execute_trade(

@@ -61,6 +61,25 @@ class TradeResponse(BaseModel):
     message: str
 
 
+class TradeSummary(BaseModel):
+    id: str
+    account_id: str
+    account_name: str
+    market_id: str
+    outcome_id: str
+    side: str
+    price: float
+    shares: float
+    order_hash: Optional[str] = None
+    status: str
+    error: Optional[str] = None
+    created_at: datetime
+    filled_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 # ===== Position Schemas =====
 
 class PositionResponse(BaseModel):

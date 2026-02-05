@@ -74,6 +74,12 @@ class PredictAccountService(ServiceClient):
     async def get_positions(self, account_id: str) -> list:
         return await self.get(f"/positions/{account_id}")
 
+    async def list_trades(self, account_id: str | None = None, limit: int = 50) -> list:
+        params = {"limit": str(limit)}
+        if account_id:
+            params["account_id"] = account_id
+        return await self.get("/trades", params=params)
+
 
 class PolymarketAccountService(ServiceClient):
     """Client for Polymarket Account Service"""

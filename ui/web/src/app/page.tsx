@@ -7,17 +7,20 @@ import { AccountList } from '@/components/accounts/account-list'
 import { StrategyList } from '@/components/strategies/strategy-list'
 import { MarketList } from '@/components/markets/market-list'
 import { AlertList } from '@/components/alerts/alert-list'
+import { TradeList } from '@/components/trades/trade-list'
 import {
   getStats,
   getAccounts,
   getStrategies,
   getMarkets,
   getAlerts,
+  getTrades,
   type DashboardStats,
   type Account,
   type Strategy,
   type Market,
   type Alert,
+  type TradeSummary,
 } from '@/lib/api'
 
 export default function Dashboard() {
@@ -26,6 +29,7 @@ export default function Dashboard() {
   const [strategies, setStrategies] = useState<Strategy[]>([])
   const [markets, setMarkets] = useState<Market[]>([])
   const [alerts, setAlerts] = useState<Alert[]>([])
+  const [trades, setTrades] = useState<TradeSummary[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -65,6 +69,15 @@ export default function Dashboard() {
     }
   }, [])
 
+  const loadTrades = useCallback(async () => {
+    try {
+      const data = await getTrades(undefined, 50)
+      setTrades(data)
+    } catch (err) {
+      console.error('Failed to load trades:', err)
+    }
+  }, [])
+
   const loadAlerts = useCallback(async () => {
     try {
       const data = await getAlerts(false, 20)
@@ -82,13 +95,14 @@ export default function Dashboard() {
       loadStrategies(),
       loadMarkets(),
       loadAlerts(),
+      loadTrades(),
     ])
       .catch((err) => {
         console.error('Initial load failed:', err)
         setError(String(err))
       })
       .finally(() => setLoading(false))
-  }, [loadStats, loadAccounts, loadStrategies, loadMarkets, loadAlerts])
+  }, [loadStats, loadAccounts, loadStrategies, loadMarkets, loadAlerts, loadTrades])
 
   // WebSocket connection for real-time updates
   useEffect(() => {
@@ -111,6 +125,7 @@ export default function Dashboard() {
           if (message.type === 'trade_events' || message.type === 'fill_events') {
             loadStats()
             loadAccounts()
+            loadTrades()
           } else if (message.type === 'account_events') {
             loadAccounts()
           }
@@ -136,7 +151,7 @@ export default function Dashboard() {
         ws.close()
       }
     }
-  }, [loadStats, loadAccounts])
+  }, [loadStats, loadAccounts, loadTrades])
 
   if (loading) {
     return (
@@ -170,6 +185,7 @@ export default function Dashboard() {
             <TabsTrigger value="accounts">Accounts</TabsTrigger>
             <TabsTrigger value="strategies">Strategies</TabsTrigger>
             <TabsTrigger value="markets">Markets</TabsTrigger>
+            <TabsTrigger value="trades">Trades</TabsTrigger>
             <TabsTrigger value="alerts">
               Alerts
               {alerts.filter(a => !a.read).length > 0 && (
@@ -190,6 +206,10 @@ export default function Dashboard() {
 
           <TabsContent value="markets">
             <MarketList markets={markets} onRefresh={loadMarkets} />
+          </TabsContent>
+
+          <TabsContent value="trades">
+            <TradeList trades={trades} onRefresh={loadTrades} />
           </TabsContent>
 
           <TabsContent value="alerts">

@@ -57,6 +57,12 @@ export async function executeTrade(data: TradeData) {
   })
 }
 
+export async function getTrades(accountId?: string, limit = 50) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (accountId) params.set('account_id', accountId)
+  return request<TradeSummary[]>(`/trades?${params}`)
+}
+
 export async function getPositions(platform: string, accountId: string) {
   return request<Position[]>(`/positions/${platform}/${accountId}`)
 }
@@ -172,6 +178,22 @@ export interface Trade {
   shares: number
   status: string
   created_at: string
+}
+
+export interface TradeSummary {
+  id: string
+  account_id: string
+  account_name: string
+  market_id: string
+  outcome_id: string
+  side: string
+  price: number
+  shares: number
+  order_hash?: string
+  status: string
+  error?: string
+  created_at: string
+  filled_at?: string
 }
 
 export interface TradeData {

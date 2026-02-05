@@ -104,6 +104,19 @@ async def delete_account(db: AsyncSession, account_id: str) -> bool:
 
 # ===== Trades =====
 
+async def get_trades(
+    db: AsyncSession,
+    account_id: Optional[str] = None,
+    limit: int = 50,
+) -> list[Trade]:
+    """List recent trades (optionally filtered by account_id)"""
+    query = select(Trade).order_by(Trade.created_at.desc()).limit(limit)
+    if account_id:
+        query = query.where(Trade.account_id == account_id)
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
 async def create_trade(
     db: AsyncSession,
     account_id: str,
