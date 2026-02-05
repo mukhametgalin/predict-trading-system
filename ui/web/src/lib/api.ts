@@ -49,6 +49,10 @@ export async function deleteAccount(platform: string, id: string) {
   return request(`/accounts/${platform}/${id}`, { method: 'DELETE' })
 }
 
+export async function disableAccount(platform: string, id: string) {
+  return request<Account>(`/accounts/${platform}/${id}/disable`, { method: 'POST' })
+}
+
 // Trading
 export async function executeTrade(data: TradeData) {
   return request<TradeResult>('/trade', {

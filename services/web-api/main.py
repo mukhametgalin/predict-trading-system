@@ -308,6 +308,93 @@ async def update_account(platform: str, account_id: str, data: AccountUpdate):
     )
 
 
+@app.post("/accounts/{platform}/{account_id}/disable", response_model=AccountSummary)
+async def disable_account(
+    platform: str,
+    account_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Disable trading on account and remove it from strategies.
+
+    Note: exchange-side cancellation/position close is NOT implemented yet.
+    This endpoint is the system-level kill-switch.
+    """
+
+    # 1) Disable account (kill-switch)
+    if platform == "predict":
+        result = await predict_service.update_account(account_id, {"active": False})
+    elif platform == "polymarket":
+        result = await polymarket_service.update_account(account_id, {"active": False})
+    else:
+        raise HTTPException(400, f"Unknown platform: {platform}")
+
+    # 2) Remove from strategies configs
+    strategies = await db.execute(text("SELECT id, config FROM strategies"))
+    changed = 0
+
+    for row in strategies.fetchall():
+        sid = str(row[0])
+        config = row[1] or {}
+        new_config = dict(config)
+        did_change = False
+
+        # Generic strategy membership list
+        if isinstance(new_config.get("account_ids"), list):
+            before = list(new_config["account_ids"])
+            after = [x for x in before if x != account_id]
+            if after != before:
+                new_config["account_ids"] = after
+                did_change = True
+
+        # Delta-neutral config (pairs of accounts)
+        if isinstance(new_config.get("pairs"), list):
+            before_pairs = list(new_config["pairs"])
+            after_pairs = [
+                p
+                for p in before_pairs
+                if isinstance(p, dict)
+                and p.get("primary") != account_id
+                and p.get("hedge") != account_id
+            ]
+            if after_pairs != before_pairs:
+                new_config["pairs"] = after_pairs
+                did_change = True
+
+        if did_change:
+            await db.execute(
+                text(
+                    "UPDATE strategies SET config = CAST(:config AS jsonb), updated_at = NOW() WHERE id = CAST(:id AS uuid)"
+                ),
+                {"id": sid, "config": json.dumps(new_config)},
+            )
+            changed += 1
+
+    if changed:
+        await db.commit()
+
+    # 3) Alert
+    await db.execute(
+        text(
+            "INSERT INTO alerts (type, title, message, data) VALUES (:type, :title, :message, CAST(:data AS jsonb))"
+        ),
+        {
+            "type": "account",
+            "title": "Account disabled",
+            "message": f"Account {result.get('name')} disabled on {platform}. Removed from {changed} strategies.",
+            "data": json.dumps({"account_id": account_id, "platform": platform, "strategies_updated": changed}),
+        },
+    )
+    await db.commit()
+
+    return AccountSummary(
+        id=result["id"],
+        name=result["name"],
+        platform=platform,
+        address=result["address"],
+        active=result["active"],
+    )
+
+
 @app.delete("/accounts/{platform}/{account_id}")
 async def delete_account(platform: str, account_id: str):
     """Delete account"""

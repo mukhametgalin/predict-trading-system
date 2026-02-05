@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { updateAccount, type Account } from '@/lib/api'
+import { disableAccount, updateAccount, type Account } from '@/lib/api'
 import { RefreshCw } from 'lucide-react'
 
 interface AccountListProps {
@@ -14,6 +14,23 @@ interface AccountListProps {
 
 export function AccountList({ accounts, onRefresh }: AccountListProps) {
   const [loading, setLoading] = useState<string | null>(null)
+
+  const handleDisable = async (account: Account) => {
+    const ok = window.confirm(
+      `Disable ${account.name}?\n\nThis will:\n- Disable new trading on this account (kill-switch)\n- Remove it from strategies\n\nNOTE: Exchange-side position closing is not automated yet.`
+    )
+    if (!ok) return
+
+    setLoading(account.id)
+    try {
+      await disableAccount(account.platform, account.id)
+      onRefresh()
+    } catch (err) {
+      console.error('Failed to disable account:', err)
+    } finally {
+      setLoading(null)
+    }
+  }
 
   const handleToggle = async (account: Account) => {
     setLoading(account.id)
@@ -57,7 +74,7 @@ export function AccountList({ accounts, onRefresh }: AccountListProps) {
                     {account.address.slice(0, 10)}...{account.address.slice(-6)}
                   </p>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
                   <div className="text-right">
                     <p className="text-sm">
                       {account.positions_count || 0} positions
@@ -66,6 +83,14 @@ export function AccountList({ accounts, onRefresh }: AccountListProps) {
                       PnL: ${(account.pnl_24h || 0).toFixed(2)}
                     </p>
                   </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={loading === account.id || !account.active}
+                    onClick={() => handleDisable(account)}
+                  >
+                    Disable
+                  </Button>
                   <Switch
                     checked={account.active}
                     disabled={loading === account.id}
