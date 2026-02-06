@@ -53,20 +53,57 @@ class PredictClient:
                 return data["data"].get("token") or data["data"].get("jwt")
             return data.get("token") or data.get("jwt")
     
-    async def authenticate(self, private_key: str) -> str:
-        """Full authentication flow: get message, sign, get JWT"""
-        account = Account.from_key(private_key)
-        address = account.address
+    async def authenticate(self, private_key: str, predict_account: str = None) -> str:
+        """Full authentication flow: get message, sign, get JWT.
+        
+        If predict_account is provided, uses Predict Account (smart wallet) flow.
+        """
+        # Ensure 0x prefix
+        if not private_key.startswith("0x"):
+            private_key = "0x" + private_key
+        
+        if predict_account:
+            # Predict Account flow - use SDK to sign
+            from predict_sdk import OrderBuilder, ChainId
+            from predict_sdk.types import OrderBuilderOptions
+            
+            builder = OrderBuilder.make(
+                ChainId.BNB_MAINNET,
+                private_key,
+                options=OrderBuilderOptions(predict_account=predict_account),
+            )
+            
+            # Get message (no address param needed for predict account)
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    f"{self.base_url}/v1/auth/message",
+                    headers=self.headers,
+                )
+                response.raise_for_status()
+                message = response.json()["data"]["message"]
+            
+            # Sign with SDK
+            signature = builder.sign_predict_account_message(message)
+            if signature and not signature.startswith("0x"):
+                signature = "0x" + signature
+            
+            # Get JWT with predict_account as signer
+            jwt = await self.get_jwt(predict_account, signature, message)
+        else:
+            # EOA flow
+            account = Account.from_key(private_key)
+            address = account.address
 
-        message = await self.get_auth_message(address)
+            message = await self.get_auth_message(address)
 
-        encoded_message = encode_defunct(text=message)
-        signed_message = account.sign_message(encoded_message)
-        signature = signed_message.signature.hex()
-        if not signature.startswith("0x"):
-            signature = "0x" + signature
+            encoded_message = encode_defunct(text=message)
+            signed_message = account.sign_message(encoded_message)
+            signature = signed_message.signature.hex()
+            if not signature.startswith("0x"):
+                signature = "0x" + signature
 
-        jwt = await self.get_jwt(address, signature, message)
+            jwt = await self.get_jwt(address, signature, message)
+        
         if not jwt:
             raise ValueError("JWT not found in auth response")
         return jwt
@@ -125,14 +162,22 @@ class PredictClient:
         shares: float,
         proxy_url: Optional[str] = None,
         private_key: Optional[str] = None,
+        predict_account: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Create order on Predict.fun using SDK for EIP-712 signing."""
+        """Create order on Predict.fun using SDK for EIP-712 signing.
+        
+        If predict_account is provided, uses Predict Account (smart wallet) flow.
+        """
         from predict_sdk import OrderBuilder, ChainId
-        from predict_sdk.types import BuildOrderInput, LimitHelperInput
+        from predict_sdk.types import BuildOrderInput, LimitHelperInput, OrderBuilderOptions
         from predict_sdk.constants import Side as SDKSide
 
         if not private_key:
             raise ValueError("private_key required for order creation")
+
+        # Ensure 0x prefix
+        if not private_key.startswith("0x"):
+            private_key = "0x" + private_key
 
         # Get market details for fee and token info
         market = await self.get_market(market_id)
@@ -153,7 +198,14 @@ class PredictClient:
             raise ValueError(f"Could not find token_id for outcome '{side}'")
 
         # Create order builder
-        builder = OrderBuilder.make(ChainId.BNB_MAINNET, private_key)
+        if predict_account:
+            builder = OrderBuilder.make(
+                ChainId.BNB_MAINNET,
+                private_key,
+                options=OrderBuilderOptions(predict_account=predict_account),
+            )
+        else:
+            builder = OrderBuilder.make(ChainId.BNB_MAINNET, private_key)
 
         # Calculate amounts (SDK uses 1e18 scale)
         sdk_side = SDKSide.BUY if side.lower() == "yes" else SDKSide.SELL
@@ -165,13 +217,17 @@ class PredictClient:
         amounts = builder.get_limit_order_amounts(helper)
 
         # Build order
-        order_input = BuildOrderInput(
-            side=sdk_side,
-            token_id=str(token_id),
-            maker_amount=amounts.maker_amount,
-            taker_amount=amounts.taker_amount,
-            fee_rate_bps=fee_bps,
-        )
+        order_input_kwargs = {
+            "side": sdk_side,
+            "token_id": str(token_id),
+            "maker_amount": amounts.maker_amount,
+            "taker_amount": amounts.taker_amount,
+            "fee_rate_bps": fee_bps,
+        }
+        if predict_account:
+            order_input_kwargs["signer"] = predict_account
+        
+        order_input = BuildOrderInput(**order_input_kwargs)
         order = builder.build_order("LIMIT", order_input)
 
         # Build typed data and sign
@@ -180,23 +236,40 @@ class PredictClient:
         )
         signed_order = builder.sign_typed_data_order(typed_data)
 
-        # Build API payload
+        # Build API payload - wrap in "data" as API expects
+        sig = signed_order.signature
+        if not sig.startswith("0x"):
+            sig = "0x" + sig
+        
+        # pricePerShare in wei (price * 1e18)
+        price_per_share_wei = str(int(price * 1e18))
+        
+        # side and signatureType as integers (matching working script)
+        side_val = order.side.value if hasattr(order.side, "value") else int(order.side)
+        sig_type_val = int(order.signature_type.value) if hasattr(order.signature_type, "value") else int(order.signature_type)
+        
         payload = {
-            "order": {
-                "salt": str(order.salt),
-                "maker": order.maker,
-                "signer": order.signer,
-                "taker": order.taker,
-                "tokenId": str(order.token_id),
-                "makerAmount": str(order.maker_amount),
-                "takerAmount": str(order.taker_amount),
-                "expiration": str(order.expiration),
-                "nonce": str(order.nonce),
-                "feeRateBps": str(order.fee_rate_bps),
-                "side": order.side.value,
-                "signatureType": order.signature_type.value,
-            },
-            "signature": signed_order.signature,
+            "data": {
+                "pricePerShare": price_per_share_wei,
+                "strategy": "LIMIT",
+                "slippageBps": "0",
+                "isFillOrKill": False,
+                "order": {
+                    "salt": str(order.salt),
+                    "maker": order.maker,
+                    "signer": order.signer,
+                    "taker": order.taker,
+                    "tokenId": str(order.token_id),
+                    "makerAmount": str(order.maker_amount),
+                    "takerAmount": str(order.taker_amount),
+                    "expiration": str(order.expiration),
+                    "nonce": str(order.nonce),
+                    "feeRateBps": str(order.fee_rate_bps),
+                    "side": side_val,
+                    "signatureType": sig_type_val,
+                    "signature": sig,
+                },
+            }
         }
 
         headers = {
@@ -204,6 +277,9 @@ class PredictClient:
             "Authorization": f"Bearer {jwt}",
             "Content-Type": "application/json",
         }
+
+        import json as json_lib
+        logger.info(f"Order payload: {json_lib.dumps(payload)}")
 
         client_kwargs = {"timeout": 60.0}
         if proxy_url:

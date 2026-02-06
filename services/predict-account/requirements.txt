@@ -9,3 +9,4 @@ httpx==0.28.1
 web3==7.6.0
 eth-account==0.13.5
 python-dotenv==1.0.1
+predict-sdk

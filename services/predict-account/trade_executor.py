@@ -71,9 +71,9 @@ async def execute_trade(
             ),
         }
 
-    # Authenticate
+    # Authenticate (use address as predict_account for smart wallet flow)
     logger.info(f"Authenticating account {account.name} ({account.address})")
-    jwt = await client.authenticate(account.private_key)
+    jwt = await client.authenticate(account.private_key, predict_account=account.address)
     
     # Create order
     logger.info(f"Creating order: {trade_request.side.upper()} {trade_request.shares} @ {trade_request.price}")
@@ -87,6 +87,7 @@ async def execute_trade(
         shares=trade_request.shares,
         proxy_url=None,  # disable proxy for first money test to avoid timeouts
         private_key=account.private_key,
+        predict_account=account.address,
     )
     
     order_hash = result.get("hash") or result.get("orderHash")
